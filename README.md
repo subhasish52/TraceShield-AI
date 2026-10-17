@@ -439,19 +439,6 @@ python autonomous_investigator.py history F-004
 
 A successful model response alone is **not** proof that tools ran. Confirm that the action history and newly reported `TestResult` exist in FalkorDB.
 
-## Suggested Demo Video (about 3 minutes)
-
-| Time | Demonstration |
-|---|---|
-| **0:00–0:25** | Introduce isolated security alerts and why connected context matters |
-| **0:25–0:55** | Show the FalkorDB graph: finding → endpoint → service → database → sensitive asset |
-| **0:55–1:25** | Explain F-004, related findings, owner team, and inherent risk |
-| **1:25–2:10** | Run the graph-directed or Gemini-powered investigation |
-| **2:10–2:40** | Show Alice HTTP 200, Bob HTTP 403, and the new persisted test result |
-| **2:40–3:00** | Show investigation history and explain shared state between agents |
-
-For a stable demo, start Docker and DemoShop beforehand. Keep previously recorded graph evidence available in case the Gemini API reaches its quota.
-
 ## Security, Scope & Limitations
 
 1. **Authorized local testing only.** No scanning of third-party or production targets is provided.
@@ -465,7 +452,7 @@ For a stable demo, start Docker and DemoShop beforehand. Keep previously recorde
 9. **Heuristic scores are not CVSS or probabilities.** Interpret them alongside remediation and test status.
 10. **No production-grade access control, secrets management, or persistence guarantees** are implied by this prototype.
 
-## roubleshooting
+## Troubleshooting
 
 | Problem | Suggested fix |
 |---|---|
