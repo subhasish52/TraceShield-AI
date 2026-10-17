@@ -1,4 +1,4 @@
-# 🛡️ TraceShield AI
+# TraceShield AI
 
 **Graph-powered security investigation, contextual prioritization, and
 remediation verification**
