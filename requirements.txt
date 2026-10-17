@@ -1,0 +1,20 @@
+# TraceShield AI — Python 3.11+ recommended (also used on Python 3.13)
+# FalkorDB graph client and environment variables
+falkordb>=1.0,<3.0
+python-dotenv>=1.0,<2.0
+
+# Gemini-powered LangChain / LangGraph tool-calling agent
+langchain>=1.0,<2.0
+langgraph>=1.0,<2.0
+langchain-google-genai>=3.0,<5.0
+
+# Streamlit dashboard and tables
+streamlit>=1.40,<2.0
+pandas>=2.2,<4.0
+
+# DOT graph support (Streamlit's st.graphviz_chart)
+graphviz>=0.20,<1.0
+
+# Standard-library only: http.server, urllib, json, subprocess, uuid,
+# datetime, argparse, pathlib, os, sys, html, etc.
+# Docker Desktop + Docker Compose are installed separately, not via pip.
