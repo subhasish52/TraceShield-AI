@@ -1,595 +1,533 @@
 # TraceShield AI
+### Graph-Powered Autonomous Security Investigation & Verification
 
-**Graph-powered security investigation, contextual prioritization, and
-remediation verification**
+**TraceShield AI** is a defensive security prototype that turns isolated vulnerability findings into **connected, explainable, and actionable investigations**. It combines **FalkorDB**, **Google Gemini**, **LangChain/LangGraph**, safe local security scanners, and a **Streamlit dashboard**.
 
-TraceShield AI is a **local defensive-security demonstration** combining
-**FalkorDB**, a **Gemini-powered LangChain/LangGraph agent**, a
-**Streamlit dashboard**, and **authorized HTTP scanners**. Rather than
-treating scanner findings as isolated alerts, TraceShield maps each
-finding onto an application dependency graph, correlates related issues,
-traces potentially affected data, recommends a next step, and records
-evidence from repeatable tests.
+Instead of only reporting that an endpoint may be vulnerable, TraceShield traces **which service owns it, which database it reaches, which sensitive assets could be affected, which team is responsible, and what authorized verification should happen next**.
 
-> **Scope and safety:** The included DemoShop app uses **fake users and
-> fake orders** on `127.0.0.1`. The intentionally vulnerable
-> configuration is **for local testing only**. Do not expose DemoShop or
-> the unauthenticated development database to the public internet. Only
-> scan systems you own or have explicit permission to assess.
+> **Hackathon:** Built for the WeMakeDevs × FalkorDB Graph Hacks — *Agents That Act on Connected Data* track.
+>
+> **Repository:** https://github.com/subhasish52/TraceShield-AI
+>
+> **Safety:** This is a **local, synthetic-data demonstration**, not a production vulnerability scanner. Autonomous checks are restricted to approved local targets and allow-listed read-only actions.
 
-## What is implemented
+---
 
-| Capability                   | Implementation                                                                                          |
-|------------------------------|---------------------------------------------------------------------------------------------------------|
-| Application dependency graph | FalkorDB with websites, endpoints, services, databases, data assets, findings, and evidence             |
-| Graph investigation          | Multi-hop Cypher traversal: finding → endpoint → service → database → asset                             |
-| Contextual scoring           | Deterministic **inherent-impact** heuristic (0–100); not a probability of exploitation                  |
-| Correlation                  | Find other findings sharing endpoints, services, or databases                                           |
-| What-if analysis             | Simulate a change in linked data classification **without modifying the graph**                         |
-| AI security analyst          | Gemini model via LangChain `create_agent` (LangGraph execution), using graph-backed tools               |
-| HTTP security-header scanner | Observes whether the local DemoShop homepage returns a CSP header                                       |
-| BOLA authorization test      | Uses two synthetic users to check cross-user access to a fake order                                     |
-| Verification history         | Saves `TestResult` records and shows before/after authorization checks                                  |
-| Audit trail                  | Can store an `Investigation` and **proposed** `Action` in FalkorDB                                      |
-| Dashboard                    | Investigation queue, impact graph, graph reasoning, verification timeline, Gemini agent, local scanners |
+## Key Features
 
-**Important:** Graph paths show possible dependencies, **not** proven
-exploit chains. `F-001`/`F-002` are seeded fixtures; `F-003` is an
-observed missing-header configuration issue; `F-004` is a
-synthetic-account authorization finding that can be confirmed and
-remediated through a local retest. A successful retest is evidence for
-the **tested scenario**, not proof that all authorization flaws are
-eliminated.
+| Capability | What TraceShield AI does |
+|---|---|
+| **Connected security knowledge graph** | Links websites, endpoints, services, databases, sensitive assets, findings, evidence, projects, and owner teams. |
+| **Graph-aware investigation** | Traverses multiple relationships to explain a finding's potential impact. |
+| **Contextual risk scoring** | Uses a deterministic **inherent-impact heuristic** to help prioritize investigation. |
+| **Finding correlation** | Discovers findings that share endpoints, services, or databases. |
+| **AI agent with tools** | Gemini uses LangChain/LangGraph tools to retrieve graph context and reason about evidence. |
+| **Graph-directed autonomy** | Selects an approved verification action based on graph context and a fixed safety policy. |
+| **Multi-agent collaboration** | An **Investigator** records a handoff; a **Verifier** reads shared FalkorDB state and executes an approved check. |
+| **Persistent audit trail** | Records investigations, decisions, actions, and test results in FalkorDB. |
+| **Security regression testing** | Checks object ownership using two synthetic DemoShop users. |
+| **Interactive dashboard** | Explores findings, impact paths, verification history, and autonomous investigation state. |
+
+## Why a graph database?
+
+Security findings are rarely independent. A single endpoint can connect to a backend service, a database, sensitive customer records, other findings, and an owning team.
+
+TraceShield uses these relationships to answer questions such as:
+
+- What sensitive data could be affected by this finding?
+- Which other findings share the same backend dependency?
+- Who owns the affected service?
+- Is the finding still exploitable, or has a regression check passed?
+- Which **approved** verification action should run next?
+- What did previous investigations decide and execute?
+
+**FalkorDB is not just a storage layer:** graph traversal informs investigation context, action selection, cross-agent handoff, and the audit history shown in the UI.
 
 ## Architecture
 
-``` mermaid
+```mermaid
 flowchart TD
-    Demo["DemoShop local web app / fake orders"]
-    Headers["HTTP-header scanner"]
-    BOLA["Synthetic-user BOLA test"]
-    Ingest["Normalizer + graph writers"]
-    DB[("FalkorDB security knowledge graph")]
-    Tools["Graph tools / graph intelligence"]
-    Agent["Gemini + LangChain/LangGraph agent"]
-    UI["Streamlit security dashboard"]
-    Demo --> Headers
-    Demo --> BOLA
-    Headers --> Ingest
-    BOLA --> Ingest
-    Ingest --> DB
-    DB --> Tools
-    Tools --> Agent
+    APP["DemoShop — local synthetic application"]
+    SCAN["Allow-listed HTTP scanners"]
+    ING["Evidence ingestion"]
+    DB[("FalkorDB Security Graph")]
+    INT["Graph intelligence + action policy"]
+    INVEST["Gemini Investigator Agent"]
+    VERIFY["Gemini Verifier Agent"]
+    EXEC["Safe autonomous executor"]
+    UI["Streamlit dashboard"]
+
+    APP --> SCAN
+    SCAN --> ING
+    ING --> DB
+    DB --> INT
+    INT --> INVEST
+    INVEST -->|"Shared graph handoff"| DB
+    DB --> VERIFY
+    VERIFY --> EXEC
+    EXEC -->|"New TestResult + audit records"| DB
     DB --> UI
-    Agent --> UI
 ```
 
-**Representative graph schema**
+### Connected-data model
 
-``` mermaid
+```mermaid
 flowchart LR
-    W[Website] -->|EXPOSES| E[Endpoint]
-    F[Finding] -->|AFFECTS| E
-    E -->|ROUTES_TO| S[Service]
-    S -->|QUERIES| D[Database]
-    D -->|STORES| A[DataAsset]
-    F -->|SUPPORTED_BY| EV[Evidence]
-    F -.->|investigated in| I[Investigation]
-    I -.->|proposes| AC[Action]
-    F -.->|verified by| T[TestResult]
+    P["Project"] -->|"CONTAINS"| W["Website"]
+    W -->|"EXPOSES"| E["Endpoint"]
+    E -->|"ROUTES_TO"| S["Service"]
+    S -->|"QUERIES"| D["Database"]
+    D -->|"STORES"| A["DataAsset"]
+    F["Finding"] -->|"AFFECTS"| E
+    F -->|"SUPPORTED_BY"| EV["Evidence"]
+    T["Team"] -->|"OWNS"| S
 ```
 
-The dashed relationships above are **conceptual**: inspect
-`graph_intelligence.py` and `ingestion/bola_writer.py` for the exact
-Cypher relationship names used in your installed version. Do not rely on
-the diagram as a migration script.
+The system also persists operational records such as **Investigation**, **Decision**, **Action**, and **TestResult**. Their exact relationship names are defined by the application's Cypher writers.
 
-## Technology stack
+**Important:** A graph path indicates a *possible impact route*, not a proven exploit chain.
 
-- **Python:** 3.11 or 3.12 recommended; the project has also been run
-  with Python 3.13.
-- **FalkorDB:** graph database, running in Docker.
-- **LangChain / LangGraph:** tool-calling investigation workflow.
-- **Google Gemini:** model selected using `GEMINI_MODEL` (example:
-  `gemini-2.5-flash-lite`). A valid Gemini API key is required for the
-  AI agent.
-- **Streamlit / pandas / Graphviz:** browser-based dashboard, tables,
-  and dependency visualization.
-- **Python standard library:** local HTTP server, HTTP test requests,
-  JSON, timestamps, and subprocesses.
+## Tech Stack
 
-`requirements.txt` contains **version ranges**, not a tested lockfile.
-For a fully reproducible submission, test a fresh environment and
-optionally export your working dependency versions with
-`python -m pip freeze > requirements-lock.txt`.
+- **Python** — application logic, graph tools, scanners, and orchestration
+- **FalkorDB** — graph storage and Cypher queries
+- **Google Gemini** — language-model reasoning and tool selection
+- **LangChain / LangGraph** — agent execution and tool calling
+- **Streamlit** — interactive security dashboard
+- **Docker Compose** — local FalkorDB runtime
+- **HTTP-based local test tools** — synthetic security observations and verification
 
-## Project layout
+## 📂 Project Structure
 
-``` text
+```text
 traceshield-graph-starter/
-├── .env                       # Local secrets; never commit
-├── .env.example               # Safe template; see below
-├── .gitignore                 # Recommended; see below
+├── agents/                         # Additional agent modules (if present)
+├── demoshop/                       # Local synthetic web application
+├── ingestion/                      # Normalize and persist observations
+├── scanners/                       # Authorized local HTTP security checks
+├── tests/                          # Automated tests
+├── action_policy.py                # Allow-listed action-selection policy
+├── agent.py                        # Graph analysis agent
+├── agent_autonomous.py             # Gemini agent with autonomy tools
+├── agent_autonomy_tools.py         # Tool interfaces for safe actions
+├── agent_graph_tools_v2.py         # Connected-data investigation tools
+├── autonomous_investigator.py      # Deterministic graph-directed executor
+├── dashboard.py                    # Streamlit interface
+├── demo.py                         # Non-LLM graph demo
+├── docker-compose.yml              # FalkorDB container
+├── graph_db.py                     # Graph connection helper
+├── graph_intelligence.py           # Traversal, correlation, risk reasoning
+├── graph_tools.py                  # Basic graph tools
+├── multi_agent_workflow.py         # Investigator → Verifier workflow
+├── seed_graph.py                   # Seed synthetic graph data
+├── seed_operational_context.py     # Seed projects and ownership context
 ├── requirements.txt
-├── docker-compose.yml
-├── graph_db.py                # FalkorDB connection
-├── graph_tools.py             # Finding, impact, evidence, risk-score tools
-├── graph_intelligence.py      # Correlation, investigation, what-if, audit
-├── agent_graph_tools_v2.py    # Extra tools exposed to Gemini
-├── agent.py                   # Gemini-powered graph agent
-├── seed_graph.py              # Seed synthetic graph fixtures
-├── demo.py                    # CLI graph demo (no LLM)
-├── dashboard.py               # Streamlit application
-├── demoshop/
-│   └── app.py                 # Local DemoShop + synthetic order API
-├── scanners/
-│   ├── __init__.py
-│   ├── http_headers.py        # Local CSP header scan
-│   └── bola_check.py          # Two-user authorization test
-└── ingestion/
-    ├── __init__.py
-    ├── normalizer.py          # Normalize HTTP scan observations
-    ├── graph_writer.py        # Persist HTTP scan observations
-    └── bola_writer.py         # Persist BOLA evidence/test history
+├── .env.example                    # Safe configuration template
+├── .gitignore
+└── README.md
 ```
 
-This layout represents the **combined starter plus the upgrades**. The
-original starter ZIP alone does not contain all these files; copy the
-previously supplied dashboard, scanner, DemoShop, and graph-intelligence
-upgrades into the project root before running the full workflow. Make
-sure `scanners/__init__.py` and `ingestion/__init__.py` exist (empty
-files are sufficient).
+The `.env` file and `.venv/` environment are **local only** and must not be committed.
 
-------------------------------------------------------------------------
+---
 
-## Local setup — Windows 10/11 (VS Code + CMD)
+## Getting Started
 
 ### 1. Prerequisites
 
-Install and launch:
+- **Python 3.11+** (the project has also been used with Python 3.13)
+- **Docker Desktop** with Docker Compose
+- **Git**
+- **Google Gemini API key** for the optional LLM-powered workflows
+- A browser for the FalkorDB UI and Streamlit
 
-1.  **Python 3.11+** (`py --version` or `python --version`); ensure
-    Python is on PATH.
-2.  **Docker Desktop** with Docker Compose (`docker --version`,
-    `docker compose version`). Start Docker Desktop before launching the
-    database.
-3.  **VS Code** (recommended) and a modern browser.
-4.  **Gemini API key** for the optional AI agent; graph tools and
-    scanners run without it.
+Commands below are written for **Windows Command Prompt (CMD)** inside VS Code.
 
-In VS Code, open the **project folder containing `agent.py` and
-`docker-compose.yml`**. Open a terminal and select **Command Prompt**
-rather than PowerShell for the commands below.
+### 2. Clone the repository
 
-### 2. Create and activate the Python environment
+```cmd
+git clone https://github.com/subhasish52/TraceShield-AI.git
+cd TraceShield-AI
+```
 
-``` cmd
+### 3. Create a virtual environment and install dependencies
+
+```cmd
 py -3 -m venv .venv
 .venv\Scripts\activate
-python --version
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-The terminal prompt should start with `(.venv)`. If `py` is unavailable,
-use `python -m venv .venv`.
+If `py` is unavailable, use `python -m venv .venv`.
 
-**PowerShell alternative:** `.\.venv\Scripts\Activate.ps1` (PowerShell
-may require an execution-policy adjustment). **macOS/Linux:**
-`python3 -m venv .venv && source .venv/bin/activate`.
+### 4. Configure environment variables
 
-### 3. Configure `.env`
-
-If `.env.example` exists:
-
-``` cmd
+```cmd
 copy .env.example .env
 ```
 
-Use the following contents in `.env` (replace the placeholder with
-**your own** API key):
+Open `.env` and configure:
 
-``` dotenv
+```dotenv
 FALKORDB_HOST=localhost
 FALKORDB_PORT=6379
 FALKORDB_GRAPH=traceshield
-GOOGLE_API_KEY=YOUR_GEMINI_API_KEY_HERE
-GEMINI_MODEL=gemini-2.5-flash-lite
+GOOGLE_API_KEY=YOUR_OWN_GEMINI_API_KEY
+GEMINI_MODEL=gemini-2.5-flash
 ```
 
-**Note:** The **original** starter `agent.py` imported
-`langchain_openai.ChatOpenAI` and used `OPENAI_API_KEY`. Your **current
-working agent** uses `langchain_google_genai.ChatGoogleGenerativeAI`,
-`GOOGLE_API_KEY`, and `GEMINI_MODEL`. This README and `requirements.txt`
-target the **current Gemini version**. If your local `agent.py` still
-imports `langchain_openai`, update it to the Gemini version before
-following the agent commands; do **not** install both providers unless
-your code actually supports both.
+The model must be available to your API key and have sufficient quota. **Never commit `.env` or your actual API key.**
 
-Never publish `.env`, keys, authorization tokens, or private data.
-Gemini API access and quota are managed by Google separately from any
-ChatGPT subscription.
+### 5. Start FalkorDB
 
-### 4. Start FalkorDB
+Start Docker Desktop, then run:
 
-From the project root:
-
-``` cmd
+```cmd
 docker compose up -d
 docker compose ps
 ```
 
-The starter `docker-compose.yml` maps:
+Default local addresses for the provided development setup:
 
-| Service           | Address                 | Purpose                     |
-|-------------------|-------------------------|-----------------------------|
-| FalkorDB protocol | `127.0.0.1:6379`        | Python graph client         |
-| FalkorDB browser  | <http://localhost:3000> | Inspect graph data visually |
+| Service | Address |
+|---|---|
+| FalkorDB graph protocol | `127.0.0.1:6379` |
+| FalkorDB browser | http://localhost:3000 |
+| DemoShop | http://127.0.0.1:8000 |
+| Streamlit dashboard | http://localhost:8501 |
 
-**Development-only configuration:** the supplied Compose file does not
-configure database authentication or persistent storage. Do not expose
-ports publicly. A `docker compose down` command removes the running
-container; without a configured persistent volume, **your graph data may
-be lost**. Avoid `docker compose down -v` unless you intentionally want
-to delete stored data. For a durable installation, add a properly
-configured persistent volume and authentication before any non-local
-use.
+Check connectivity:
 
-Check the database connection:
-
-``` cmd
+```cmd
 python -c "from graph_db import get_graph; print(get_graph().ro_query('RETURN 1').result_set)"
 ```
 
-Expected: `[[1]]` (or an equivalent single-row result).
+> The development database should remain bound to localhost. Persistence depends on your `docker-compose.yml` configuration; do not assume the graph survives container deletion.
 
-### 5. Seed the initial graph
+### 6. Seed the graph
 
-``` cmd
+```cmd
 python seed_graph.py
-python demo.py F-001
-python demo.py F-002
+python seed_operational_context.py
 ```
 
-`F-001` and `F-002` are **synthetic, unverified examples**. `F-001`
-links the Orders endpoint to sensitive customer-order data; `F-002`
-represents a missing-CSP scenario. Seeding uses Cypher `MERGE` to avoid
-duplicating seeded nodes and edges.
+The first script seeds synthetic application dependencies and example findings. The second adds connected project and team ownership context.
 
-If you already have F-003/F-004 and their history in FalkorDB, **do not
-reset the graph just to follow these instructions**.
+You can check the initial graph without using Gemini:
 
-### 6. Run DemoShop locally
+```cmd
+python demo.py F-001
+python graph_intelligence.py investigate F-001
+```
 
-Open a **second CMD terminal**, activate the same `.venv` if needed, and
-run:
+### 7. Start DemoShop in secure mode
 
-``` cmd
+Open a **second terminal** and run:
+
+```cmd
+.venv\Scripts\activate
 python demoshop\app.py --secure
 ```
 
-Visit <http://127.0.0.1:8000/>. The `--secure` flag enforces order
-ownership in the fake order API. Keep this terminal open while scanning
-or using dashboard scanner buttons.
+DemoShop is available at http://127.0.0.1:8000.
 
-The deliberately vulnerable test mode is:
+In secure mode, the synthetic owner should be allowed to access their order, while a different synthetic user should be denied. Keep this terminal running during verification.
 
-``` cmd
-python demoshop\app.py
-```
+### 8. Run the local scanners
 
-**Only use vulnerable mode on localhost with synthetic data.** Stop the
-existing DemoShop process with **Ctrl+C** before switching modes; only
-one process can listen on port 8000.
+Open another terminal in the project directory:
 
-### 7. Run the HTTP-header scanner
-
-From another terminal at the project root:
-
-``` cmd
-python -m scanners.http_headers
-```
-
-The scanner makes an authorized local request and records the observed
-missing Content-Security-Policy header as `F-003` with evidence in
-FalkorDB. An absent CSP header is a **configuration observation**, not
-proof that XSS is exploitable.
-
-### 8. Run the synthetic-user BOLA verification
-
-**To reproduce the full before/after lifecycle:**
-
-1.  Stop DemoShop if running (`Ctrl+C`). Start the deliberately
-    vulnerable demo: `python demoshop\app.py`.
-2.  In another terminal run `python -m scanners.bola_check`.
-3.  Expected: Alice **HTTP 200**, Bob **HTTP 200**; cross-user access is
-    observed on **fake order 101**, creating/updating `F-004` and a
-    `TestResult`.
-4.  Stop DemoShop; restart securely: `python demoshop\app.py --secure`.
-5.  Rerun `python -m scanners.bola_check`.
-6.  Expected: Alice **HTTP 200**, Bob **HTTP 403**; the test records
-    denial of cross-user access. If a prior confirming test exists,
-    `F-004` can transition to **REMEDIATED**.
-7.  Inspect the saved history:
-
-``` cmd
-python -m scanners.bola_check --history
-```
-
-**Do not present the secure-mode switch as an AI automatically patching
-production code.** It is a controlled developer-operated demonstration.
-The scanner uses local fake identities (`demo-alice`, `demo-bob`) and
-fake order data; it does not use real accounts.
-
-### 9. Run graph intelligence (no LLM key required)
-
-``` cmd
-python graph_intelligence.py investigate F-004
-python graph_intelligence.py compare F-003 F-004
-python graph_intelligence.py whatif F-004 public
-python graph_intelligence.py record F-003
-```
-
-- `investigate` returns the finding, graph paths, evidence, score,
-  correlated findings, and a proposed next action.
-- `compare` ranks by the heuristic score; **always interpret the current
-  remediation status separately**.
-- `whatif` simulates reclassifying linked data assets **in memory**,
-  without writing to FalkorDB.
-- `record` creates investigation/proposed-action records. It does
-  **not** apply a fix.
-
-The default scoring heuristic uses severity, internet exposure, data
-sensitivity, and graph reachability. A risk score of 90 can remain
-visible on a **REMEDIATED** finding because it describes **inherent
-impact**, not current exploitability or remediation success.
-
-### 10. Run the Gemini graph agent
-
-Make sure `.env` contains a valid `GOOGLE_API_KEY` and your `agent.py`
-has the graph-intelligence tools integrated. Examples:
-
-``` cmd
-python agent.py "Investigate F-004 and explain the evidence and graph impact"
-python agent.py "Compare F-003 and F-004, including current remediation status"
-python agent.py "What happens to F-004 risk if linked data were public?"
-python agent.py "Record an investigation and proposed next action for F-003"
-```
-
-The agent should call graph-backed tools, separate **observed evidence**
-from assumptions, and distinguish **historical inherent impact** from
-**current remediation status**. Model responses are not a substitute for
-the recorded test results.
-
-### 11. Start the Streamlit dashboard
-
-Open a **third CMD terminal** in the project root:
-
-``` cmd
+```cmd
 .venv\Scripts\activate
-python -m streamlit run dashboard.py
-```
-
-Open <http://localhost:8501/>. The upgraded dashboard includes:
-
-| Tab                   | What to demonstrate                                                         |
-|-----------------------|-----------------------------------------------------------------------------|
-| Investigation Queue   | Findings, sources, statuses, inherent risk, unresolved vs. remediated       |
-| Impact Graph          | Finding → endpoint → service → database → data asset                        |
-| Graph Reasoning       | Correlated findings and hypothetical asset-classification change            |
-| Verification Timeline | Chronological BOLA test evidence: confirmed failure, then successful denial |
-| Gemini Agent          | Tool-grounded security investigation and comparison                         |
-| Local Scanners        | Run localhost-only CSP and synthetic-account BOLA checks                    |
-
-The dashboard reads FalkorDB directly. If a scan finishes, use the
-**Refresh dashboard data** button or rerun the page to see updated
-results.
-
-**Normal local run: three terminals**
-
-``` text
-Terminal A: docker compose up -d           (Docker service runs in background)
-Terminal B: python demoshop\app.py --secure
-Terminal C: python -m streamlit run dashboard.py
-```
-
-The CLI scans and agent commands can be run in another terminal as
-needed.
-
-------------------------------------------------------------------------
-
-## Findings and interpretation
-
-| ID      | Origin                   | Meaning                                                               | Typical state                                                   |
-|---------|--------------------------|-----------------------------------------------------------------------|-----------------------------------------------------------------|
-| `F-001` | Seeded fixture           | Possible broken order authorization, with sensitive-data graph path   | `UNVERIFIED`                                                    |
-| `F-002` | Seeded fixture           | Missing-CSP example                                                   | `UNVERIFIED`                                                    |
-| `F-003` | Local HTTP scanner       | Missing CSP header observed at `/`                                    | `UNVERIFIED` for exploitability; header observation is recorded |
-| `F-004` | Local two-user HTTP test | Cross-user access to fake order, followed by secure-mode verification | `CONFIRMED` before fix; `REMEDIATED` after successful retest    |
-
-`F-001` and `F-004` can share the Orders API/service/database.
-**Correlation is not identity:** a remediated `F-004` does not
-automatically prove every possible `F-001` authorization concern is
-resolved. Similarly, `F-002` is a fixture, while `F-003` is an actual
-observed header response.
-
-### Sample FalkorDB Cypher queries
-
-Open the FalkorDB browser at <http://localhost:3000> and select the
-`traceshield` graph (or use `get_graph().ro_query(...)`).
-
-**List findings:**
-
-``` cypher
-MATCH (f:Finding)
-RETURN f.id, f.title, f.status, f.source
-ORDER BY f.id
-```
-
-**Trace downstream impact:**
-
-``` cypher
-MATCH (f:Finding {id: 'F-004'})-[:AFFECTS]->(e:Endpoint)
-OPTIONAL MATCH (e)-[:ROUTES_TO]->(s:Service)
-OPTIONAL MATCH (s)-[:QUERIES]->(d:Database)
-OPTIONAL MATCH (d)-[:STORES]->(a:DataAsset)
-RETURN f.id, e.path, s.name, d.name, a.name, a.classification
-```
-
-**Find other findings on the same endpoint:**
-
-``` cypher
-MATCH (f:Finding {id: 'F-004'})-[:AFFECTS]->(e:Endpoint)<-[:AFFECTS]-(other:Finding)
-WHERE other.id <> f.id
-RETURN DISTINCT other.id, other.title
-```
-
-**Inspect BOLA test records:**
-
-``` cypher
-MATCH (t:TestResult)
-RETURN t.id, t.outcome, t.owner_http, t.other_http, t.checked_at
-ORDER BY t.checked_at
-```
-
-**Inspect evidence:**
-
-``` cypher
-MATCH (f:Finding {id: 'F-004'})-[:SUPPORTED_BY]->(e:Evidence)
-RETURN f.id, e.id, e.summary, e.confirmed
-```
-
-Use parameterized Cypher in application code; avoid concatenating
-user-provided strings into graph queries.
-
-## Suggested demo (3–4 minutes)
-
-1.  **Problem (20s):** Conventional security scanners report isolated
-    issues; application context is missing.
-2.  **Detection (45s):** Run the synthetic-user BOLA test against
-    deliberately vulnerable local DemoShop; show Alice/Bob HTTP 200 and
-    a stored test result.
-3.  **Graph impact (45s):** Show F-004 linked to the Orders Service,
-    Shop Database, and sensitive Customer Orders.
-4.  **Agent reasoning (45s):** Ask Gemini to compare F-003 and F-004,
-    including evidence and current verification status. Demonstrate
-    graph correlation and the what-if score change.
-5.  **Verification (45s):** Restart DemoShop with `--secure`; rerun the
-    test; show Bob HTTP 403 and the verification timeline.
-6.  **Conclusion (20s):** Explain why the graph is central to impact
-    tracing, correlation, and auditable evidence.
-
-Record a backup demo video and screenshots before the submission
-deadline. Only claim capabilities you can reproduce on a fresh local
-installation.
-
-## Troubleshooting
-
-| Problem                                                    | What to check                                                                                                      |
-|------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------|
-| `ModuleNotFoundError`                                      | Activate `.venv`; run `python -m pip install -r requirements.txt`; confirm the correct VS Code interpreter         |
-| Docker connection refused on `6379`                        | Start Docker Desktop; run `docker compose up -d`; inspect `docker compose ps` and `docker compose logs falkordb`   |
-| FalkorDB browser unavailable on `3000`                     | Check container health and port conflicts; `docker compose ps`                                                     |
-| No findings in dashboard                                   | Run `python seed_graph.py` and scanners; confirm `FALKORDB_GRAPH=traceshield`                                      |
-| DemoShop connection refused                                | Start `python demoshop\app.py --secure` in another terminal; check port `8000`                                     |
-| Port `8000` already in use                                 | Stop the existing DemoShop process with `Ctrl+C` before starting another mode                                      |
-| BOLA scanner reports HTTP 200 for Bob                      | You are probably running **vulnerable mode**; use `--secure` to demonstrate remediation                            |
-| BOLA scanner reports HTTP 403 for Bob                      | Ownership enforcement is active for the tested synthetic order                                                     |
-| Gemini authentication or quota error                       | Verify `GOOGLE_API_KEY`, model access, quota, and network connectivity; graph/scanner tools can run without Gemini |
-| Blank Streamlit page                                       | Check Streamlit terminal traceback; `python -m py_compile dashboard.py`; hard-refresh browser; restart Streamlit   |
-| Graph diagram fails                                        | Install `graphviz` Python package; verify `st.graphviz_chart` support and browser connectivity                     |
-| Missing Graph Reasoning tab                                | You are running an older `dashboard.py`; install the revised dashboard                                             |
-| Agent claims remediated F-004 is still highest active risk | Instruct it to consider current status; keep inherent impact separate from current investigation priority          |
-| Data disappeared after container removal                   | Original Compose setup has no guaranteed persistent volume; reseed and rerun scanners                              |
-
-Quick checks:
-
-``` cmd
-python -m py_compile agent.py dashboard.py graph_intelligence.py
-python -c "from graph_db import get_graph; print(get_graph().ro_query('MATCH (f:Finding) RETURN count(f)').result_set)"
-python -m scanners.bola_check --history
-```
-
-## Privacy, security, and limitations
-
-- Only perform scans on **authorized** targets. Current scanner modules
-  intentionally target the local DemoShop environment.
-- The default DemoShop application is deliberately vulnerable; it must
-  **never** be hosted as a public production service.
-- FalkorDB's starter Compose file is **unauthenticated development
-  configuration**; keep it on loopback and add authentication,
-  persistence, and hardening before any deployment.
-- No production credentials, real user data, or personal order
-  information should be ingested into the graph.
-- The synthetic-account BOLA check covers a **single fake order and two
-  fake users**. A 403 response does not prove all authorization paths
-  are secure.
-- A missing CSP header does not independently demonstrate XSS; an
-  implemented CSP must also be reviewed for policy quality.
-- The graph-based priority score is a **heuristic**; it is not a
-  calibrated probability, CVSS replacement, or proof of compromise.
-- Correlation means findings share a graph component, not necessarily a
-  root cause.
-- What-if classification simulates a scoring-input change, not a real
-  remediation or causal intervention.
-- `record_investigation` creates a proposed action; **a human must
-  approve actual changes**. The demo's `--secure` flag is an
-  operator-controlled configuration switch.
-- AI explanations can be incorrect. Review them against FalkorDB nodes,
-  scan outputs, and test history.
-
-## GitHub hygiene
-
-Create a `.gitignore` containing at least:
-
-``` gitignore
-.venv/
-.env
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.streamlit/secrets.toml
-*.log
-.DS_Store
-.vscode/
-```
-
-Commit a **safe** `.env.example` containing the variable names with an
-empty API-key value. Do not commit your real `.env`, API keys, access
-tokens, or exported graph data containing secrets.
-
-### Recommended validation before publishing
-
-``` cmd
-python -m pip check
-python -m py_compile agent.py dashboard.py graph_intelligence.py
-python demo.py F-001
 python -m scanners.http_headers
 python -m scanners.bola_check
 python -m scanners.bola_check --history
 ```
 
-For a clean-install check, create a new virtual environment and install
-only from `requirements.txt`. Do not claim a clean install has been
-verified until you've run it yourself.
+These tests observe the **local** DemoShop application and persist findings or verification evidence to FalkorDB.
 
-## Project status and future work
+To demonstrate the *before remediation* BOLA behavior, DemoShop can also be started **without** `--secure` on localhost only. Stop that server before switching modes. Do not deploy the intentionally vulnerable mode publicly.
 
-This is a **local hackathon prototype**, not a production vulnerability
-management platform. Potential future extensions include scanner
-adapters, authenticated multi-tenant deployments, automated regression
-suites, secure remediation approval workflows, richer graph analytics,
-and persistent database backups.
+---
 
-## Acknowledgments and AI assistance
+## 🤖 Autonomous Graph-Driven Investigation
 
-Built with FalkorDB, LangChain/LangGraph, Google Gemini, Streamlit, and
-Python. AI assistance was used in the design, implementation, and
-documentation workflow; all security claims should be validated against
-reproducible tests. Add your **team name, repository URL, demo video,
-and hackathon submission link** before publishing.
+The deterministic investigation loop can operate **without a Gemini API call**. It reads FalkorDB, determines the permitted next action, applies a fixed local-only policy, executes the approved test, and records the outcome.
 
-## License
+### Preview the action plan
 
-No license is implied by this README. Add a `LICENSE` file only after
-choosing the terms under which you want others to use the code.
+```cmd
+python autonomous_investigator.py plan F-004
+```
+
+### Execute an approved regression verification
+
+```cmd
+python autonomous_investigator.py run F-004
+```
+
+### Review persistent investigation history
+
+```cmd
+python autonomous_investigator.py history F-004
+```
+
+For a secure DemoShop instance, the expected **synthetic** order-ownership result is:
+
+```text
+[Owner (Alice)] HTTP 200
+[Other user (Bob)] HTTP 403
+[PASS] Order ownership enforced: non-owner access denied.
+```
+
+The action should produce a new `TestResult` and associated investigation/audit records. Actual record IDs are generated at runtime.
+
+A local security-header recheck is also available:
+
+```cmd
+python autonomous_investigator.py run F-003
+```
+
+### Safety policy
+
+The autonomous executor is intentionally constrained:
+
+- Only **explicitly allow-listed local, read-only verification actions** may run.
+- The authorized demonstration target is **127.0.0.1:8000**.
+- Arbitrary shell commands, external targets, and unrestricted URLs are not permitted.
+- Autonomous code changes or production remediation are **not** performed.
+- Execution results and decisions are recorded for later inspection.
+
+The policy is implemented in `action_policy.py` and enforced by the autonomous workflow. A model's natural-language request is not itself authorization to bypass these restrictions.
+
+## Gemini-Powered Agents
+
+### Single autonomous agent
+
+```cmd
+python agent_autonomous.py "Investigate F-004 using FalkorDB, execute the approved regression verification, and explain the result."
+```
+
+This agent can retrieve connected context and invoke the approved investigation tools. Verify claimed execution using persisted records, rather than trusting the model's explanation alone.
+
+### Two-agent workflow
+
+```cmd
+python multi_agent_workflow.py F-004
+```
+
+**Agent 1 — Investigator**
+
+1. Retrieves connected graph context and evidence.
+2. Examines current status and the safe action plan.
+3. Records an investigation and prepares a handoff.
+4. Does **not** execute verification.
+
+**Agent 2 — Verifier**
+
+1. Reads the shared investigation history from FalkorDB.
+2. Inspects the allowed verification action.
+3. Invokes the local autonomous verification tool.
+4. Reads the updated graph state and reports the outcome.
+
+This is a demonstration of **shared, persistent graph state** rather than two agents relying only on a transient chat transcript.
+
+**Quota note:** Gemini may return `429 RESOURCE_EXHAUSTED`. The multi-agent workflow uses several model calls. When quota is unavailable, demonstrate the non-LLM workflow with `python autonomous_investigator.py run F-004`. Do not describe that fallback as Gemini-driven.
+
+---
+
+## Streamlit Dashboard
+
+Launch the dashboard in a separate terminal:
+
+```cmd
+python -m streamlit run dashboard.py
+```
+
+Open **http://localhost:8501**.
+
+The dashboard provides graph-backed views of findings and risk context, dependency/impact relationships, related findings, evidence and verification history, and the autonomous investigation workflow. Available sections depend on the checked-in version of `dashboard.py`.
+
+### Suggested three-terminal setup
+
+```text
+Terminal 1: docker compose up -d
+Terminal 2: python demoshop\app.py --secure
+Terminal 3: python -m streamlit run dashboard.py
+```
+
+Use an additional terminal to run `agent_autonomous.py` or `multi_agent_workflow.py` while the services remain active.
+
+## Demonstration Findings
+
+| Finding | Scenario | Evidence interpretation |
+|---|---|---|
+| **F-001** | Possible broken object-level authorization (BOLA) | Seeded, **unverified** fixture with a sensitive-data dependency path |
+| **F-002** | Missing Content Security Policy | Seeded, **unverified** configuration fixture |
+| **F-003** | Missing CSP observed on local DemoShop | Header observation recorded; exploitability is **not** established |
+| **F-004** | Synthetic-account cross-user order access | Demonstrates confirmation in vulnerable mode and **REMEDIATED** status after secure-mode regression verification |
+
+### Example: F-004
+
+```text
+Finding: F-004
+    ↓ affects
+Endpoint: /api/orders/{id}
+    ↓ routes to
+Service: Orders Service
+    ↓ queries
+Database: Shop Database
+    ↓ stores
+Data Asset: Customer Orders (sensitive)
+```
+
+The graph can also connect the service to an owner team, such as **Commerce Backend**, and correlate the finding with other issues affecting the same endpoint.
+
+**Risk-score interpretation:** A score such as **90/100** describes an *inherent impact heuristic*. It does **not** mean a remediated finding has a 90% chance of being exploitable. Always show the current verification status alongside the score.
+
+## 🔍 Example FalkorDB Queries
+
+Open the FalkorDB browser at http://localhost:3000 and select the `traceshield` graph.
+
+**List findings**
+
+```cypher
+MATCH (f:Finding)
+RETURN f.id AS id, f.title AS title, f.status AS status
+ORDER BY id;
+```
+
+**Trace affected assets**
+
+```cypher
+MATCH (f:Finding {id: 'F-004'})-[:AFFECTS]->(e:Endpoint)
+      -[:ROUTES_TO]->(s:Service)
+      -[:QUERIES]->(d:Database)
+      -[:STORES]->(a:DataAsset)
+RETURN f.id, e.path, s.name, d.name, a.name;
+```
+
+**Find related findings on the same endpoint**
+
+```cypher
+MATCH (f:Finding {id: 'F-004'})-[:AFFECTS]->(e:Endpoint)
+      <-[:AFFECTS]-(other:Finding)
+WHERE other.id <> f.id
+RETURN other.id, other.title;
+```
+
+Property names depend on the seeded schema; adjust queries if your graph version uses different names.
+
+## Tests & Validation
+
+With FalkorDB running and the environment activated:
+
+```cmd
+python -m pip check
+python -m unittest discover -s tests -p "test_*.py"
+python -m py_compile action_policy.py agent_autonomous.py agent_autonomy_tools.py agent_graph_tools_v2.py autonomous_investigator.py dashboard.py graph_intelligence.py multi_agent_workflow.py seed_operational_context.py
+python autonomous_investigator.py plan F-004
+```
+
+For an integration test, start secure DemoShop and run:
+
+```cmd
+python autonomous_investigator.py run F-004
+python autonomous_investigator.py history F-004
+```
+
+A successful model response alone is **not** proof that tools ran. Confirm that the action history and newly reported `TestResult` exist in FalkorDB.
+
+## Suggested Demo Video (about 3 minutes)
+
+| Time | Demonstration |
+|---|---|
+| **0:00–0:25** | Introduce isolated security alerts and why connected context matters |
+| **0:25–0:55** | Show the FalkorDB graph: finding → endpoint → service → database → sensitive asset |
+| **0:55–1:25** | Explain F-004, related findings, owner team, and inherent risk |
+| **1:25–2:10** | Run the graph-directed or Gemini-powered investigation |
+| **2:10–2:40** | Show Alice HTTP 200, Bob HTTP 403, and the new persisted test result |
+| **2:40–3:00** | Show investigation history and explain shared state between agents |
+
+For a stable demo, start Docker and DemoShop beforehand. Keep previously recorded graph evidence available in case the Gemini API reaches its quota.
+
+## Security, Scope & Limitations
+
+1. **Authorized local testing only.** No scanning of third-party or production targets is provided.
+2. **Synthetic identities and orders only.** DemoShop's insecure mode is intentionally vulnerable and must never be exposed publicly.
+3. **Local development infrastructure.** The sample database configuration is not hardened for internet deployment.
+4. **No autonomous production fixes.** Switching DemoShop to secure mode is a developer-controlled configuration change.
+5. **Limited test coverage.** A passing two-user check does not establish that every authorization path is secure.
+6. **CSP observation ≠ XSS proof.** A missing header is a configuration observation, not demonstrated exploitation.
+7. **Graph reachability ≠ confirmed compromise.** Relationships support impact analysis, not proof of exploitability.
+8. **AI output requires verification.** FalkorDB records and scanner results are the evidence source of truth.
+9. **Heuristic scores are not CVSS or probabilities.** Interpret them alongside remediation and test status.
+10. **No production-grade access control, secrets management, or persistence guarantees** are implied by this prototype.
+
+## roubleshooting
+
+| Problem | Suggested fix |
+|---|---|
+| `ModuleNotFoundError` | Activate `.venv` and run `python -m pip install -r requirements.txt` |
+| Cannot connect to FalkorDB | Start Docker Desktop, run `docker compose up -d`, and inspect `docker compose ps` |
+| Dashboard shows no findings | Run `python seed_graph.py` and `python seed_operational_context.py` |
+| DemoShop connection refused | Start `python demoshop\app.py --secure` and confirm port `8000` |
+| Bob receives HTTP 200 | DemoShop may be running in intentionally vulnerable mode; restart with `--secure` |
+| Gemini returns `429 RESOURCE_EXHAUSTED` | Wait for quota availability or run the deterministic autonomous workflow |
+| Multi-agent workflow reports an action but no record exists | Inspect tool execution and FalkorDB history; do not treat an AI summary as verified evidence |
+| `git push` is rejected with `fetch first` | Fetch remote changes and integrate them before pushing; avoid `--force` |
+
+## GitHub Publishing
+
+Keep these out of version control:
+
+```gitignore
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.streamlit/secrets.toml
+.claude/
+*.log
+```
+
+Before pushing:
+
+```cmd
+git status
+git diff --cached --name-only
+git push -u origin main
+```
+
+If GitHub contains commits not yet present locally, integrate them carefully:
+
+```cmd
+git fetch origin
+git pull --rebase origin main
+git push -u origin main
+```
+
+If a rebase conflict occurs, resolve it before pushing. **Never force-push just to bypass a conflict.**
+
+## 🗺️ Future Work
+
+- More authorized scanner adapters and test scenarios
+- Better graph visualizations and explanation traces
+- CI regression tests and deterministic evaluation datasets
+- Stronger authentication, audit controls, and persistent deployment
+- Human approval workflows for high-impact operations
+- More comprehensive security verification beyond the synthetic demo
+
+## Acknowledgments
+
+Built using **FalkorDB**, **Google Gemini**, **LangChain/LangGraph**, **Streamlit**, **Python**, and **Docker**.
+
+AI assistance was used during design, development, debugging, and documentation. Security conclusions should always be checked against reproducible evidence.
+
+---
+
+**TraceShield AI — From isolated alerts to connected, explainable, safely actionable security investigations.**
